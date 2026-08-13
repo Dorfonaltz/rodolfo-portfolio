@@ -76,12 +76,6 @@ type BrandStyle = CSSProperties & {
   "--brand-secondary": string;
 };
 
-type AmbientAudio = {
-  context: AudioContext;
-  master: GainNode;
-  sources: AudioScheduledSourceNode[];
-};
-
 const panels: Panel[] = [
   {
     id: "sobre",
@@ -415,25 +409,17 @@ export default function PortfolioUniverse() {
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
-  const audioRef = useRef<AmbientAudio | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const stopAmbient = useCallback(() => {
-    const ambient = audioRef.current;
-    if (!ambient) return;
+    const audio = audioRef.current;
+    if (!audio) return;
 
+    audio.onended = null;
+    audio.pause();
+    audio.currentTime = 0;
     audioRef.current = null;
     setAudioEnabled(false);
-    const now = ambient.context.currentTime;
-    ambient.master.gain.cancelScheduledValues(now);
-    ambient.master.gain.setValueAtTime(Math.max(ambient.master.gain.value, 0.0001), now);
-    ambient.master.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
-
-    window.setTimeout(() => {
-      ambient.sources.forEach((source) => {
-        try { source.stop(); } catch { /* source already stopped */ }
-      });
-      void ambient.context.close();
-    }, 280);
   }, []);
 
   const toggleAmbient = useCallback(async () => {
@@ -442,69 +428,24 @@ export default function PortfolioUniverse() {
       return;
     }
 
-    const AudioContextClass = window.AudioContext
-      ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextClass) return;
+    const audio = new Audio("/valve-intro.mp3");
+    audio.preload = "auto";
+    audio.volume = 0.35;
+    audio.onended = () => {
+      if (audioRef.current !== audio) return;
+      audioRef.current = null;
+      setAudioEnabled(false);
+    };
 
-    const context = new AudioContextClass();
-    const master = context.createGain();
-    const filter = context.createBiquadFilter();
-    const sources: AudioScheduledSourceNode[] = [];
-    const now = context.currentTime;
+    audioRef.current = audio;
 
-    master.gain.setValueAtTime(0.0001, now);
-    master.gain.exponentialRampToValueAtTime(0.12, now + 1.8);
-    filter.type = "lowpass";
-    filter.frequency.setValueAtTime(520, now);
-    filter.Q.setValueAtTime(1.4, now);
-    filter.connect(master);
-    master.connect(context.destination);
-
-    [46.25, 69.3, 92.5].forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = index === 0 ? "sawtooth" : "sine";
-      oscillator.frequency.setValueAtTime(frequency, now);
-      oscillator.detune.setValueAtTime(index * -7, now);
-      gain.gain.setValueAtTime([0.16, 0.1, 0.055][index], now);
-      oscillator.connect(gain).connect(filter);
-      oscillator.start();
-      sources.push(oscillator);
-    });
-
-    const noiseBuffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
-    const noiseData = noiseBuffer.getChannelData(0);
-    for (let index = 0; index < noiseData.length; index += 1) {
-      noiseData[index] = (Math.random() * 2 - 1) * 0.14;
+    try {
+      await audio.play();
+      setAudioEnabled(true);
+    } catch {
+      audioRef.current = null;
+      setAudioEnabled(false);
     }
-    const noise = context.createBufferSource();
-    const noiseFilter = context.createBiquadFilter();
-    const noiseGain = context.createGain();
-    noise.buffer = noiseBuffer;
-    noise.loop = true;
-    noiseFilter.type = "bandpass";
-    noiseFilter.frequency.setValueAtTime(310, now);
-    noiseFilter.Q.setValueAtTime(0.7, now);
-    noiseGain.gain.setValueAtTime(0.18, now);
-    noise.connect(noiseFilter).connect(noiseGain).connect(filter);
-    noise.start();
-    sources.push(noise);
-
-    const intro = context.createOscillator();
-    const introGain = context.createGain();
-    intro.type = "sine";
-    intro.frequency.setValueAtTime(178, now);
-    intro.frequency.exponentialRampToValueAtTime(58, now + 2.7);
-    introGain.gain.setValueAtTime(0.0001, now);
-    introGain.gain.exponentialRampToValueAtTime(0.22, now + 0.08);
-    introGain.gain.exponentialRampToValueAtTime(0.0001, now + 2.7);
-    intro.connect(introGain).connect(master);
-    intro.start();
-    intro.stop(now + 2.8);
-
-    audioRef.current = { context, master, sources };
-    setAudioEnabled(true);
-    if (context.state === "suspended") await context.resume();
   }, [stopAmbient]);
 
   const closeModal = useCallback(() => {
@@ -564,12 +505,12 @@ export default function PortfolioUniverse() {
   }, [active, closeModal]);
 
   useEffect(() => () => {
-    const ambient = audioRef.current;
-    if (!ambient) return;
-    ambient.sources.forEach((source) => {
-      try { source.stop(); } catch { /* source already stopped */ }
-    });
-    void ambient.context.close();
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.onended = null;
+    audio.pause();
+    audio.currentTime = 0;
+    audioRef.current = null;
   }, []);
 
   const activePanel = active ? panels.find((panel) => panel.id === active) : null;
